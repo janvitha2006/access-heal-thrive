@@ -78,12 +78,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Arandol Health Kendra — Rural Healthcare Access" },
+      { title: "Care Connect — Rural Healthcare Access & SOS" },
       {
         name: "description",
         content:
-          "Live availability, appointments and teleconsultation for public health facilities in rural and underserved areas.",
+          "Live availability, appointments, teleconsultation and emergency SOS for public health facilities in rural and underserved areas.",
       },
+
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],

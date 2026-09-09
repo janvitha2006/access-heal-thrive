@@ -110,6 +110,18 @@
   }
 }
 
+@keyframes sosring {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.52 0.13 33 / 45%);
+  }
+  70% {
+    box-shadow: 0 0 0 16px oklch(0.52 0.13 33 / 0%);
+  }
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.52 0.13 33 / 0%);
+  }
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
@@ -126,4 +138,9 @@
   .status-pulse {
     animation: softpulse 2.6s ease-in-out infinite;
   }
+
+  .sos-pulse {
+    animation: sosring 1.8s ease-out infinite;
+  }
 }
+

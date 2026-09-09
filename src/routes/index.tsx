@@ -32,7 +32,7 @@ const statusLabel: Record<FacilityStatus, string> = {
   unavail: "Full today",
 };
 
-function StatusBadge({ status, label }: { status: FacilityStatus; label?: string }) {
+function StatusBadge({ status, label }: { status: FacilityStatus; label?: string | undefined }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap ${

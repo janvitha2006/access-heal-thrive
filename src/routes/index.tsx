@@ -1,6 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { languages, useI18n, type Lang } from "../lib/i18n";
+import { clearUser, getStoredUser, initialsOf, type CCUser } from "../lib/auth";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -26,13 +28,7 @@ export const Route = createFileRoute("/")({
 
 type FacilityStatus = "avail" | "limited" | "unavail";
 
-const statusLabel: Record<FacilityStatus, string> = {
-  avail: "Available",
-  limited: "Limited",
-  unavail: "Full today",
-};
-
-function StatusBadge({ status, label }: { status: FacilityStatus; label?: string | undefined }) {
+function StatusBadge({ status, label }: { status: FacilityStatus; label: string }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap ${
@@ -48,99 +44,58 @@ function StatusBadge({ status, label }: { status: FacilityStatus; label?: string
               : "bg-unavail"
         }`}
       />
-      {label ?? statusLabel[status]}
+      {label}
     </span>
   );
 }
 
 const facilities: {
   type: string;
-  name: string;
+  nameKey: string;
   status: FacilityStatus;
-  statusText?: string;
-  detail: string;
+  onCall?: boolean;
+  detailKey: string;
   distance: string;
-  action: string;
+  actionKey: "view" | "call";
 }[] = [
-  {
-    type: "PHC",
-    name: "Chitravad PHC",
-    status: "avail",
-    detail: "GP 2 · 3 beds · OR · Dispensary",
-    distance: "2.4 km",
-    action: "View",
-  },
-  {
-    type: "CHC",
-    name: "Gharsoda CHC",
-    status: "limited",
-    detail: "GP, Med Officer, Lab · 2 cots",
-    distance: "6.1 km",
-    action: "View",
-  },
-  {
-    type: "HSC",
-    name: "Kosad Health Centre",
-    status: "unavail",
-    detail: "Physio, ENT · Maternity cot booked",
-    distance: "9.8 km",
-    action: "View",
-  },
-  {
-    type: "ASHA",
-    name: "Suresh, ASHA Worker",
-    status: "avail",
-    statusText: "On call",
-    detail: "Home visits · Mother & child care",
-    distance: "1.2 km",
-    action: "Call",
-  },
+  { type: "PHC", nameKey: "facPhc", status: "avail", detailKey: "facPhcDetail", distance: "2.4 km", actionKey: "view" },
+  { type: "CHC", nameKey: "facChc", status: "limited", detailKey: "facChcDetail", distance: "6.1 km", actionKey: "view" },
+  { type: "HSC", nameKey: "facHsc", status: "unavail", detailKey: "facHscDetail", distance: "9.8 km", actionKey: "view" },
+  { type: "ASHA", nameKey: "facAsha", status: "avail", onCall: true, detailKey: "facAshaDetail", distance: "1.2 km", actionKey: "call" },
 ];
 
 const timeSlots = ["10:00", "11:00", "11:30"];
 
 const emergencyTypes = [
-  { id: "accident", label: "Accident / injury", hint: "Trauma, bleeding, fall" },
-  { id: "cardiac", label: "Chest pain", hint: "Heart attack, breathlessness" },
-  { id: "maternity", label: "Maternity", hint: "Labour, pregnancy emergency" },
-  { id: "snakebite", label: "Snake bite / poison", hint: "Anti-venom needed" },
-  { id: "child", label: "Child emergency", hint: "High fever, seizure" },
-  { id: "other", label: "Other", hint: "Describe on the call" },
+  { id: "accident", labelKey: "eAccident", hintKey: "eAccidentH" },
+  { id: "cardiac", labelKey: "eCardiac", hintKey: "eCardiacH" },
+  { id: "maternity", labelKey: "eMaternity", hintKey: "eMaternityH" },
+  { id: "snakebite", labelKey: "eSnakebite", hintKey: "eSnakebiteH" },
+  { id: "child", labelKey: "eChild", hintKey: "eChildH" },
+  { id: "other", labelKey: "eOther", hintKey: "eOtherH" },
 ];
 
-const medicines: { name: string; use: string; stock: number; unit: string }[] = [
-  { name: "Paracetamol 500mg", use: "Fever, pain", stock: 320, unit: "tablets" },
-  { name: "ORS sachets", use: "Dehydration", stock: 84, unit: "packs" },
-  { name: "Amoxicillin 250mg", use: "Infection", stock: 12, unit: "strips" },
-  { name: "Iron & folic acid", use: "Anaemia, pregnancy", stock: 210, unit: "tablets" },
-  { name: "Anti-venom serum", use: "Snake bite", stock: 0, unit: "vials" },
-  { name: "Metformin 500mg", use: "Diabetes", stock: 46, unit: "strips" },
-  { name: "Salbutamol inhaler", use: "Asthma", stock: 5, unit: "units" },
+const medicines: { name: string; useKey: string; stock: number; unitKey: string }[] = [
+  { name: "Paracetamol 500mg", useKey: "useFever", stock: 320, unitKey: "tablets" },
+  { name: "ORS sachets", useKey: "useDehydration", stock: 84, unitKey: "packs" },
+  { name: "Amoxicillin 250mg", useKey: "useInfection", stock: 12, unitKey: "strips" },
+  { name: "Iron & folic acid", useKey: "useAnaemia", stock: 210, unitKey: "tablets" },
+  { name: "Anti-venom serum", useKey: "useSnakebite", stock: 0, unitKey: "vials" },
+  { name: "Metformin 500mg", useKey: "useDiabetes", stock: 46, unitKey: "strips" },
+  { name: "Salbutamol inhaler", useKey: "useAsthma", stock: 5, unitKey: "units" },
 ];
 
-const triageAnswers: Record<string, { level: FacilityStatus; text: string }> = {
-  "Fever over 3 days": {
-    level: "limited",
-    text: "Visit Chitravad PHC today. Carry your Ayushman card. Drink ORS meanwhile.",
-  },
-  "Chest pain / breathless": {
-    level: "unavail",
-    text: "This can be an emergency. Raise SOS now — do not travel alone.",
-  },
-  "Pregnancy check-up": {
-    level: "avail",
-    text: "ANC check-ups run 10 am – 1 pm at the PHC. Suresh (ASHA) can accompany you.",
-  },
-  "Cut or wound": {
-    level: "limited",
-    text: "Clean with water, cover the wound and reach the HSC for a tetanus shot.",
-  },
-};
+const triage: { key: string; textKey: string; level: FacilityStatus }[] = [
+  { key: "sym1", textKey: "sym1t", level: "limited" },
+  { key: "sym2", textKey: "sym2t", level: "unavail" },
+  { key: "sym3", textKey: "sym3t", level: "avail" },
+  { key: "sym4", textKey: "sym4t", level: "limited" },
+];
 
 const records = [
-  { date: "02 Mar", title: "Blood test — Haemoglobin 11.2", place: "Gharsoda CHC lab" },
-  { date: "18 Feb", title: "Prescription — Iron + folic acid", place: "Dr. Meera Patel" },
-  { date: "04 Jan", title: "ANC visit 2 · BP normal", place: "Chitravad PHC" },
+  { date: "02 Mar", titleKey: "rec1", placeKey: "rec1p" },
+  { date: "18 Feb", titleKey: "rec2", placeKey: "rec2p" },
+  { date: "04 Jan", titleKey: "rec3", placeKey: "rec3p" },
 ];
 
 function fmt(sec: number) {
@@ -150,6 +105,11 @@ function fmt(sec: number) {
 }
 
 function Index() {
+  const navigate = useNavigate();
+  const { lang, setLang, t, speak, stop, speaking } = useI18n();
+  const [user, setUser] = useState<CCUser | null>(null);
+  const [checked, setChecked] = useState(false);
+
   const [slot, setSlot] = useState("10:00");
   const [sosOpen, setSosOpen] = useState(false);
   const [sosType, setSosType] = useState<string | null>(null);
@@ -157,6 +117,17 @@ function Index() {
   const [eta, setEta] = useState(660);
   const [query, setQuery] = useState("");
   const [symptom, setSymptom] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+
+  useEffect(() => {
+    const u = getStoredUser();
+    if (!u) {
+      navigate({ to: "/auth", replace: true });
+      return;
+    }
+    setUser(u);
+    setChecked(true);
+  }, [navigate]);
 
   useEffect(() => {
     if (!sosActive) return;
@@ -168,15 +139,72 @@ function Index() {
     const q = query.trim().toLowerCase();
     if (!q) return medicines;
     return medicines.filter(
-      (m) => m.name.toLowerCase().includes(q) || m.use.toLowerCase().includes(q),
+      (m) => m.name.toLowerCase().includes(q) || t(m.useKey).toLowerCase().includes(q),
     );
-  }, [query]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, lang]);
+
+  if (!checked || !user) return null;
+
+  const statusText = (s: FacilityStatus) =>
+    s === "avail" ? t("available") : s === "limited" ? t("limited") : t("full");
+
+  const firstName = user.name.trim().split(/\s+/)[0] ?? user.name;
+  const greeting = `${t("greeting").split(",")[0]}, ${firstName}`;
+
+  function listenToPage() {
+    if (speaking) {
+      stop();
+      return;
+    }
+    speak(
+      [
+        greeting,
+        t("subtitle"),
+        t("facTitle"),
+        t("phcTitle"),
+        `${t("doctors")}: ${t("drMeera")}, ${t("drRajan")}.`,
+        t("sosDesc"),
+      ].join(". "),
+    );
+  }
+
+  function voiceSearch() {
+    const w = window as unknown as Record<string, unknown>;
+    const SR = (w["SpeechRecognition"] ?? w["webkitSpeechRecognition"]) as
+      | (new () => {
+          lang: string;
+          onresult: (e: { results: { 0: { 0: { transcript: string } } } }) => void;
+          onend: () => void;
+          onerror: () => void;
+          start: () => void;
+        })
+      | undefined;
+    if (!SR) {
+      toast.info(t("noVoice"));
+      return;
+    }
+    const rec = new SR();
+    rec.lang = languages.find((l) => l.code === lang)?.voice ?? "en-IN";
+    rec.onresult = (e) => setQuery(e.results[0][0].transcript);
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    setListening(true);
+    rec.start();
+  }
 
   function raiseSos() {
     setSosActive(true);
     setEta(660);
     setSosOpen(false);
-    toast.error("SOS sent · 108 ambulance dispatched to Arandol, Junagadh");
+    toast.error(t("tSos"));
+    speak(t("tSos"));
+  }
+
+  function signOut() {
+    stop();
+    clearUser();
+    navigate({ to: "/auth", replace: true });
   }
 
   return (
@@ -190,41 +218,64 @@ function Index() {
               </div>
             </div>
             <div className="leading-none">
-              <p className="font-display font-medium text-lg">Care Connect</p>
-              <p className="text-cream/70 text-xs mt-0.5">Rural Public Health Network</p>
+              <p className="font-display font-medium text-lg">{t("brand")}</p>
+              <p className="text-cream/70 text-xs mt-0.5">{t("tagline")}</p>
             </div>
           </div>
           <nav aria-label="Main" className="hidden md:flex items-center gap-1 text-sm">
             <a href="#home" className="px-3 py-2 rounded-lg bg-cream/15 font-medium text-cream">
-              Home
+              {t("navHome")}
             </a>
             <a href="#facilities" className="px-3 py-2 rounded-lg text-cream/70 hover:text-cream">
-              Facilities
+              {t("navFacilities")}
             </a>
             <a href="#medicines" className="px-3 py-2 rounded-lg text-cream/70 hover:text-cream">
-              Medicines
+              {t("navMedicines")}
             </a>
             <a href="#book" className="px-3 py-2 rounded-lg text-cream/70 hover:text-cream">
-              Book
+              {t("navBook")}
             </a>
             <a href="#records" className="px-3 py-2 rounded-lg text-cream/70 hover:text-cream">
-              Records
+              {t("navRecords")}
             </a>
           </nav>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <select
+              aria-label={t("language")}
+              value={lang}
+              onChange={(e) => setLang(e.target.value as Lang)}
+              className="rounded-lg bg-cream/15 text-cream px-2 py-2 text-xs outline-none ring-1 ring-cream/25 [&>option]:text-ink"
+            >
+              {languages.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={listenToPage}
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-cream/15 px-3 py-2 text-xs font-medium ring-1 ring-cream/25 hover:bg-cream/25"
+            >
+              <span aria-hidden="true">{speaking ? "⏹" : "🔊"}</span>
+              {speaking ? t("stop") : t("listen")}
+            </button>
             <button
               type="button"
               onClick={() => setSosOpen(true)}
               className="hidden sm:inline-flex items-center gap-2 rounded-lg bg-unavail px-3 py-2 text-xs font-semibold text-cream hover:opacity-90"
             >
-              SOS
+              {t("sos")}
             </button>
-            <div
-              className="size-9 rounded-full bg-cream/20 grid place-items-center text-sm font-medium ring-1 ring-cream/30"
-              aria-label="Signed in as Rekha K"
+            <button
+              type="button"
+              onClick={signOut}
+              title={user.name}
+              aria-label={`${user.name} — sign out`}
+              className="size-9 rounded-full bg-cream/20 grid place-items-center text-sm font-medium ring-1 ring-cream/30 hover:bg-cream/30"
             >
-              RK
-            </div>
+              {initialsOf(user.name)}
+            </button>
           </div>
         </div>
       </header>
@@ -234,18 +285,20 @@ function Index() {
           <div className="max-w-6xl mx-auto px-5 sm:px-8 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
             <span className="inline-flex items-center gap-2 font-semibold">
               <span className="size-2 rounded-full bg-cream status-pulse" />
-              SOS active · ambulance GJ-11-AZ-2043
+              {t("sosActive")}
             </span>
-            <span className="text-cream/85">Arrives in {fmt(eta)} · driver Kiran, 108</span>
+            <span className="text-cream/85">
+              {t("sosArrives")} {fmt(eta)} · {t("sosDriver")}
+            </span>
             <button
               type="button"
               onClick={() => {
                 setSosActive(false);
-                toast.success("SOS closed. Take care, Rekha.");
+                toast.success(t("tSosClosed"));
               }}
               className="ml-auto rounded-lg bg-cream/20 px-3 py-1.5 text-xs font-medium hover:bg-cream/30"
             >
-              Cancel SOS
+              {t("sosCancel")}
             </button>
           </div>
         </div>
@@ -253,13 +306,19 @@ function Index() {
 
       <main id="home" className="max-w-6xl mx-auto px-5 sm:px-8 py-8">
         <section className="mb-8">
-          <p className="text-[13px] text-pine font-medium tracking-wide">Wednesday, 12 March</p>
+          <p className="text-[13px] text-pine font-medium tracking-wide">{t("date")}</p>
           <h1 className="text-balance font-display font-medium text-3xl sm:text-4xl leading-tight mt-1">
-            Namaste, Rekha
+            {greeting}
           </h1>
-          <p className="text-pretty text-ink/70 text-base mt-2 max-w-[52ch]">
-            Your Ayushman Bharat card is active. Here is what is open today near you.
-          </p>
+          <p className="text-pretty text-ink/70 text-base mt-2 max-w-[52ch]">{t("subtitle")}</p>
+          <button
+            type="button"
+            onClick={listenToPage}
+            className="mt-3 inline-flex sm:hidden items-center gap-1.5 rounded-lg bg-pine text-cream px-3 py-2 text-xs font-medium"
+          >
+            <span aria-hidden="true">{speaking ? "⏹" : "🔊"}</span>
+            {speaking ? t("stop") : t("listenPage")}
+          </button>
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -267,17 +326,17 @@ function Index() {
             <div className="bg-cream rounded-2xl ring-1 ring-black/5 p-5 sm:p-6">
               <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
-                  <h2 className="font-display font-medium text-xl">Nearest facilities</h2>
-                  <p className="text-ink/60 text-sm mt-0.5">Updated 8:45 am · live status</p>
+                  <h2 className="font-display font-medium text-xl">{t("facTitle")}</h2>
+                  <p className="text-ink/60 text-sm mt-0.5">{t("facSub")}</p>
                 </div>
                 <span className="text-xs font-medium text-pine bg-pine-soft rounded-full px-3 py-1 whitespace-nowrap">
-                  4 within 12 km
+                  {t("facCount")}
                 </span>
               </div>
               <div className="space-y-3">
                 {facilities.map((f) => (
                   <div
-                    key={f.name}
+                    key={f.nameKey}
                     className="flex items-center gap-4 rounded-xl ring-1 ring-black/5 p-4"
                   >
                     <div
@@ -293,23 +352,26 @@ function Index() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{f.name}</p>
-                        <StatusBadge status={f.status} label={f.statusText} />
+                        <p className="font-medium truncate">{t(f.nameKey)}</p>
+                        <StatusBadge
+                          status={f.status}
+                          label={f.onCall ? t("onCall") : statusText(f.status)}
+                        />
                       </div>
-                      <p className="text-ink/60 text-sm mt-0.5 truncate">{f.detail}</p>
+                      <p className="text-ink/60 text-sm mt-0.5 truncate">{t(f.detailKey)}</p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-lg font-semibold leading-none">{f.distance}</p>
                       <button
                         type="button"
                         onClick={() =>
-                          f.action === "Call"
-                            ? toast.info("Calling Suresh (ASHA worker)…")
-                            : toast.info(`Opening ${f.name} details…`)
+                          f.actionKey === "call"
+                            ? toast.info(t("tCallAsha"))
+                            : toast.info(t("tOpening"))
                         }
                         className="mt-1 text-xs font-medium text-pine underline underline-offset-2"
                       >
-                        {f.action}
+                        {t(f.actionKey)}
                       </button>
                     </div>
                   </div>
@@ -318,48 +380,50 @@ function Index() {
             </div>
 
             <section className="mt-6 bg-cream rounded-2xl ring-1 ring-black/5 p-5 sm:p-6">
-              <h2 className="font-display font-medium text-xl mb-4">Today at Chitravad PHC</h2>
-              <p className="text-ink/55 text-xs uppercase tracking-[0.12em] mb-2">Doctors</p>
+              <h2 className="font-display font-medium text-xl mb-4">{t("phcTitle")}</h2>
+              <p className="text-ink/55 text-xs uppercase tracking-[0.12em] mb-2">
+                {t("doctors")}
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
                 <div className="flex items-center justify-between rounded-xl ring-1 ring-black/5 p-4">
                   <div>
-                    <p className="font-medium">Dr. Meera Patel</p>
-                    <p className="text-ink/60 text-sm mt-0.5">General physician · 10 am – 1 pm</p>
+                    <p className="font-medium">{t("drMeera")}</p>
+                    <p className="text-ink/60 text-sm mt-0.5">{t("drMeeraRole")}</p>
                   </div>
-                  <StatusBadge status="avail" />
+                  <StatusBadge status="avail" label={t("available")} />
                 </div>
                 <div className="flex items-center justify-between rounded-xl ring-1 ring-black/5 p-4">
                   <div>
-                    <p className="font-medium">Rajan, Medical Officer</p>
-                    <p className="text-ink/60 text-sm mt-0.5">Emergency · on duty</p>
+                    <p className="font-medium">{t("drRajan")}</p>
+                    <p className="text-ink/60 text-sm mt-0.5">{t("drRajanRole")}</p>
                   </div>
-                  <StatusBadge status="avail" />
+                  <StatusBadge status="avail" label={t("available")} />
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-xl ring-1 ring-black/5 p-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">Beds</p>
-                    <span className="text-xs font-medium text-avail">Plenty</span>
+                    <p className="text-sm font-medium">{t("beds")}</p>
+                    <span className="text-xs font-medium text-avail">{t("plenty")}</span>
                   </div>
                   <p className="text-2xl font-semibold mt-1">8</p>
-                  <p className="text-ink/55 text-xs mt-0.5">of 14 cots free</p>
+                  <p className="text-ink/55 text-xs mt-0.5">{t("bedsFree")}</p>
                 </div>
                 <div className="rounded-xl ring-1 ring-black/5 p-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">Medicines</p>
-                    <span className="text-xs font-medium text-limited">Low stock</span>
+                    <p className="text-sm font-medium">{t("medicines")}</p>
+                    <span className="text-xs font-medium text-limited">{t("lowStock")}</span>
                   </div>
                   <p className="text-2xl font-semibold mt-1">42</p>
-                  <p className="text-ink/55 text-xs mt-0.5">common items in stock</p>
+                  <p className="text-ink/55 text-xs mt-0.5">{t("itemsInStock")}</p>
                 </div>
                 <div className="rounded-xl ring-1 ring-black/5 p-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">Lab</p>
-                    <span className="text-xs font-medium text-unavail">Closed</span>
+                    <p className="text-sm font-medium">{t("lab")}</p>
+                    <span className="text-xs font-medium text-unavail">{t("closed")}</span>
                   </div>
                   <p className="text-2xl font-semibold mt-1">—</p>
-                  <p className="text-ink/55 text-xs mt-0.5">Reopens Friday</p>
+                  <p className="text-ink/55 text-xs mt-0.5">{t("reopens")}</p>
                 </div>
               </div>
             </section>
@@ -370,20 +434,29 @@ function Index() {
             >
               <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
-                  <h2 className="font-display font-medium text-xl">Medicine stock</h2>
-                  <p className="text-ink/60 text-sm mt-0.5">Chitravad PHC dispensary · live count</p>
+                  <h2 className="font-display font-medium text-xl">{t("medTitle")}</h2>
+                  <p className="text-ink/60 text-sm mt-0.5">{t("medSub")}</p>
                 </div>
               </div>
               <label htmlFor="med-search" className="sr-only">
-                Search medicines
+                {t("medSearch")}
               </label>
-              <input
-                id="med-search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search a medicine or symptom, e.g. fever"
-                className="w-full rounded-xl ring-1 ring-black/10 bg-paper/60 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-pine"
-              />
+              <div className="flex gap-2">
+                <input
+                  id="med-search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t("medSearch")}
+                  className="flex-1 rounded-xl ring-1 ring-black/10 bg-paper/60 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-pine"
+                />
+                <button
+                  type="button"
+                  onClick={voiceSearch}
+                  className="shrink-0 rounded-xl bg-pine text-cream px-4 py-3 text-xs font-semibold hover:opacity-90"
+                >
+                  {listening ? t("listening") : `🎙 ${t("speakSearch")}`}
+                </button>
+              </div>
               <div className="mt-4 space-y-2">
                 {filteredMeds.map((m) => {
                   const level: FacilityStatus =
@@ -395,30 +468,26 @@ function Index() {
                     >
                       <div className="min-w-0 flex-1">
                         <p className="font-medium text-sm truncate">{m.name}</p>
-                        <p className="text-ink/60 text-xs mt-0.5">{m.use}</p>
+                        <p className="text-ink/60 text-xs mt-0.5">{t(m.useKey)}</p>
                       </div>
                       <StatusBadge
                         status={level}
-                        label={
-                          m.stock === 0 ? "Out of stock" : `${m.stock} ${m.unit}`
-                        }
+                        label={m.stock === 0 ? t("outOfStock") : `${m.stock} ${t(m.unitKey)}`}
                       />
                       {m.stock === 0 && (
                         <button
                           type="button"
-                          onClick={() => toast.info(`Requested ${m.name} from Gharsoda CHC store`)}
+                          onClick={() => toast.info(t("tRequested"))}
                           className="text-xs font-medium text-pine underline underline-offset-2 shrink-0"
                         >
-                          Request
+                          {t("request")}
                         </button>
                       )}
                     </div>
                   );
                 })}
                 {filteredMeds.length === 0 && (
-                  <p className="text-ink/60 text-sm py-4">
-                    Nothing matches “{query}”. Ask the pharmacist on 1800-114-114.
-                  </p>
+                  <p className="text-ink/60 text-sm py-4">{t("noMatch")}</p>
                 )}
               </div>
             </section>
@@ -427,28 +496,28 @@ function Index() {
               id="records"
               className="mt-6 bg-cream rounded-2xl ring-1 ring-black/5 p-5 sm:p-6"
             >
-              <h2 className="font-display font-medium text-xl mb-4">Your health records</h2>
+              <h2 className="font-display font-medium text-xl mb-4">{t("recTitle")}</h2>
               <div className="space-y-3">
                 {records.map((r) => (
                   <div
-                    key={r.title}
+                    key={r.titleKey}
                     className="flex items-center gap-4 rounded-xl ring-1 ring-black/5 p-4"
                   >
                     <div className="size-11 rounded-xl bg-pine-soft text-pine grid place-items-center text-[11px] font-semibold shrink-0">
                       {r.date.split(" ")[0]}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm truncate">{r.title}</p>
+                      <p className="font-medium text-sm truncate">{t(r.titleKey)}</p>
                       <p className="text-ink/60 text-xs mt-0.5 truncate">
-                        {r.date} · {r.place}
+                        {r.date} · {t(r.placeKey)}
                       </p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => toast.info(`Opening record: ${r.title}`)}
+                      onClick={() => toast.info(t("tOpening"))}
                       className="text-xs font-medium text-pine underline underline-offset-2 shrink-0"
                     >
-                      Open
+                      {t("open")}
                     </button>
                   </div>
                 ))}
@@ -458,94 +527,91 @@ function Index() {
 
           <aside className="lg:col-span-1 space-y-6">
             <div className="rounded-2xl bg-unavail text-cream p-5 sm:p-6">
-              <h2 className="font-display font-medium text-xl">Emergency SOS</h2>
-              <p className="text-cream/80 text-sm mt-1 mb-4 text-pretty">
-                One tap alerts the 108 ambulance, the nearest facility and your ASHA worker with
-                your location.
-              </p>
+              <h2 className="font-display font-medium text-xl">{t("sosTitle")}</h2>
+              <p className="text-cream/80 text-sm mt-1 mb-4 text-pretty">{t("sosDesc")}</p>
               <button
                 type="button"
                 onClick={() => setSosOpen(true)}
                 className="sos-pulse w-full py-4 rounded-xl bg-cream text-unavail font-semibold text-base hover:bg-cream/90"
               >
-                Raise SOS
+                {t("sosRaise")}
               </button>
               <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                 <button
                   type="button"
-                  onClick={() => toast.info("Calling 108 ambulance…")}
+                  onClick={() => toast.info(t("tCall108"))}
                   className="rounded-lg bg-cream/15 py-2.5 font-medium hover:bg-cream/25"
                 >
-                  Call 108
+                  {t("call108")}
                 </button>
                 <button
                   type="button"
-                  onClick={() => toast.info("Location shared with Suresh (ASHA worker)")}
+                  onClick={() => toast.info(t("tShared"))}
                   className="rounded-lg bg-cream/15 py-2.5 font-medium hover:bg-cream/25"
                 >
-                  Share location
+                  {t("shareLocation")}
                 </button>
               </div>
             </div>
 
             <div className="bg-cream rounded-2xl ring-1 ring-black/5 p-5 sm:p-6">
-              <h2 className="font-display font-medium text-xl mb-1">Quick symptom check</h2>
-              <p className="text-ink/60 text-sm mb-3">Guidance only — not a diagnosis.</p>
+              <h2 className="font-display font-medium text-xl mb-1">{t("symTitle")}</h2>
+              <p className="text-ink/60 text-sm mb-3">{t("symSub")}</p>
               <div className="flex flex-wrap gap-2">
-                {Object.keys(triageAnswers).map((s) => (
+                {triage.map((s) => (
                   <button
-                    key={s}
+                    key={s.key}
                     type="button"
-                    onClick={() => setSymptom(s)}
-                    aria-pressed={symptom === s}
+                    onClick={() => setSymptom(s.key)}
+                    aria-pressed={symptom === s.key}
                     className={`rounded-full px-3 py-2 text-xs font-medium ring-1 ${
-                      symptom === s
+                      symptom === s.key
                         ? "bg-pine text-cream ring-pine"
                         : "bg-paper/60 text-ink ring-black/10 hover:bg-paper"
                     }`}
                   >
-                    {s}
+                    {t(s.key)}
                   </button>
                 ))}
               </div>
               {symptom && (
                 <div className="mt-4 rounded-xl ring-1 ring-black/5 p-4">
                   <StatusBadge
-                    status={triageAnswers[symptom]!.level}
+                    status={triage.find((s) => s.key === symptom)!.level}
                     label={
-                      triageAnswers[symptom]!.level === "unavail"
-                        ? "Urgent"
-                        : triageAnswers[symptom]!.level === "limited"
-                          ? "See a doctor"
-                          : "Routine"
+                      triage.find((s) => s.key === symptom)!.level === "unavail"
+                        ? t("urgent")
+                        : triage.find((s) => s.key === symptom)!.level === "limited"
+                          ? t("seeDoctor")
+                          : t("routine")
                     }
                   />
                   <p className="text-sm text-ink/75 mt-2 text-pretty">
-                    {triageAnswers[symptom]!.text}
+                    {t(triage.find((s) => s.key === symptom)!.textKey)}
                   </p>
                 </div>
               )}
             </div>
 
             <div id="book" className="bg-pine text-cream rounded-2xl p-5 sm:p-6">
-              <h2 className="font-display font-medium text-xl">Book an appointment</h2>
-              <p className="text-cream/70 text-sm mt-1 mb-4">Chitravad PHC · with Dr. Meera Patel</p>
+              <h2 className="font-display font-medium text-xl">{t("bookTitle")}</h2>
+              <p className="text-cream/70 text-sm mt-1 mb-4">{t("bookSub")}</p>
               <div className="rounded-xl bg-cream/10 ring-1 ring-cream/20 p-4">
-                <p className="text-xs text-cream/70 mb-2">Choose a time · 13 March</p>
+                <p className="text-xs text-cream/70 mb-2">{t("bookChoose")}</p>
                 <div className="grid grid-cols-3 gap-2">
-                  {timeSlots.map((t) => (
+                  {timeSlots.map((ts) => (
                     <button
-                      key={t}
+                      key={ts}
                       type="button"
-                      onClick={() => setSlot(t)}
-                      aria-pressed={slot === t}
+                      onClick={() => setSlot(ts)}
+                      aria-pressed={slot === ts}
                       className={`py-2.5 rounded-lg text-sm font-medium ${
-                        slot === t
+                        slot === ts
                           ? "bg-cream text-pine"
                           : "bg-cream/10 text-cream ring-1 ring-cream/20 hover:bg-cream/20"
                       }`}
                     >
-                      {t}
+                      {ts}
                     </button>
                   ))}
                 </div>
@@ -554,43 +620,39 @@ function Index() {
                 <div className="size-10 rounded-lg bg-cream/15 grid place-items-center shrink-0 text-xs font-semibold">
                   ID
                 </div>
-                <p className="text-sm text-cream/85">Ayushman Bharat card · verified by ASHA</p>
+                <p className="text-sm text-cream/85">{t("bookCard")}</p>
               </div>
               <button
                 type="button"
-                onClick={() =>
-                  toast.success(`Appointment booked for 13 March at ${slot} with Dr. Meera Patel`)
-                }
+                onClick={() => toast.success(t("tBooked"))}
                 className="mt-4 w-full py-3 rounded-xl bg-cream text-pine font-semibold text-sm hover:bg-cream/90"
               >
-                Confirm booking
+                {t("bookConfirm")}
               </button>
             </div>
 
             <div className="bg-cream rounded-2xl ring-1 ring-black/5 p-5 sm:p-6">
-              <h2 className="font-display font-medium text-xl mb-3">Talk to a doctor now</h2>
-              <p className="text-ink/65 text-sm text-pretty">
-                Video or phone consult for follow-up and general questions.
-              </p>
+              <h2 className="font-display font-medium text-xl mb-3">{t("teleTitle")}</h2>
+              <p className="text-ink/65 text-sm text-pretty">{t("teleDesc")}</p>
               <button
                 type="button"
-                onClick={() => toast.info("Connecting you to the teleconsultation queue…")}
+                onClick={() => toast.info(t("tTele"))}
                 className="mt-4 w-full py-3 rounded-xl bg-leaf text-cream font-semibold text-sm hover:bg-leaf/90"
               >
-                Start teleconsultation
+                {t("teleStart")}
               </button>
             </div>
 
             <div id="schemes" className="bg-cream rounded-2xl ring-1 ring-black/5 p-5 sm:p-6">
-              <h2 className="font-display font-medium text-xl mb-3">Your schemes</h2>
+              <h2 className="font-display font-medium text-xl mb-3">{t("schemesTitle")}</h2>
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="size-9 rounded-lg bg-pine-soft text-pine grid place-items-center text-[11px] font-semibold shrink-0">
                     AB
                   </div>
                   <div className="min-w-0">
-                    <p className="font-medium text-sm">Ayushman Bharat</p>
-                    <p className="text-ink/60 text-xs">₹5 lakh cover · active</p>
+                    <p className="font-medium text-sm">{t("scheme1")}</p>
+                    <p className="text-ink/60 text-xs">{t("scheme1d")}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -598,17 +660,17 @@ function Index() {
                     JS
                   </div>
                   <div className="min-w-0">
-                    <p className="font-medium text-sm">JS-Yojana</p>
-                    <p className="text-ink/60 text-xs">Free GP + medicines</p>
+                    <p className="font-medium text-sm">{t("scheme2")}</p>
+                    <p className="text-ink/60 text-xs">{t("scheme2d")}</p>
                   </div>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => toast.info("Checking your scheme eligibility…")}
+                onClick={() => toast.info(t("tElig"))}
                 className="mt-4 text-sm font-medium text-pine underline underline-offset-2"
               >
-                Check my eligibility
+                {t("checkElig")}
               </button>
             </div>
           </aside>
@@ -617,8 +679,8 @@ function Index() {
 
       <footer className="bg-pine text-cream/70">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
-          <p>Care Connect · a public service prototype</p>
-          <p>Helpline 1800-114-114 · Ambulance 108 · 24 hours</p>
+          <p>{t("footer1")}</p>
+          <p>{t("footer2")}</p>
         </div>
       </footer>
 
@@ -627,35 +689,33 @@ function Index() {
         onClick={() => setSosOpen(true)}
         className="sos-pulse fixed bottom-5 right-5 z-40 sm:hidden rounded-full bg-unavail text-cream font-semibold px-6 py-4 shadow-lg"
       >
-        SOS
+        {t("sos")}
       </button>
 
       {sosOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Emergency SOS"
+          aria-label={t("sosTitle")}
           className="fixed inset-0 z-50 grid place-items-end sm:place-items-center bg-ink/50 p-0 sm:p-6"
         >
           <div className="w-full sm:max-w-md bg-cream rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="font-display font-medium text-xl">Emergency SOS</h2>
-                <p className="text-ink/60 text-sm mt-1">
-                  Arandol, Junagadh · location will be shared
-                </p>
+                <h2 className="font-display font-medium text-xl">{t("sosTitle")}</h2>
+                <p className="text-ink/60 text-sm mt-1">{t("sosPlace")}</p>
               </div>
               <button
                 type="button"
                 onClick={() => setSosOpen(false)}
                 className="text-sm text-ink/60 hover:text-ink"
               >
-                Close
+                {t("close")}
               </button>
             </div>
 
             <p className="text-ink/55 text-xs uppercase tracking-[0.12em] mt-5 mb-2">
-              What happened?
+              {t("sosWhat")}
             </p>
             <div className="grid grid-cols-2 gap-2">
               {emergencyTypes.map((e) => (
@@ -670,18 +730,18 @@ function Index() {
                       : "bg-paper/60 ring-black/10 hover:bg-paper"
                   }`}
                 >
-                  <p className="text-sm font-medium">{e.label}</p>
+                  <p className="text-sm font-medium">{t(e.labelKey)}</p>
                   <p
                     className={`text-xs mt-0.5 ${sosType === e.id ? "text-cream/75" : "text-ink/55"}`}
                   >
-                    {e.hint}
+                    {t(e.hintKey)}
                   </p>
                 </button>
               ))}
             </div>
 
             <div className="mt-4 rounded-xl ring-1 ring-black/5 p-4 text-sm text-ink/70">
-              Alerting: 108 ambulance · Chitravad PHC · Suresh (ASHA) · family contact Kiran K.
+              {t("sosAlerting")}
             </div>
 
             <button
@@ -690,14 +750,14 @@ function Index() {
               onClick={raiseSos}
               className="mt-4 w-full py-4 rounded-xl bg-unavail text-cream font-semibold text-base disabled:opacity-50 hover:opacity-90"
             >
-              Send SOS now
+              {t("sosSend")}
             </button>
             <button
               type="button"
-              onClick={() => toast.info("Calling 108 ambulance…")}
+              onClick={() => toast.info(t("tCall108"))}
               className="mt-2 w-full py-3 rounded-xl ring-1 ring-black/10 font-medium text-sm hover:bg-paper"
             >
-              Just call 108 instead
+              {t("sosJustCall")}
             </button>
           </div>
         </div>
